@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OCR & AI Recognition Studio</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background: #0a0e1a;
+      color: #e6e9f2;
+    }
+    * { box-sizing: border-box; }
+
+    /* Boot loader */
+    #boot-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: radial-gradient(ellipse at center, #111627, #0a0e1a);
+      z-index: 9999;
+      transition: opacity 0.4s ease;
+      padding: 20px;
+    }
+    #boot-loader.hidden { opacity: 0; pointer-events: none; }
+    .boot-logo {
+      width: 64px; height: 64px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+      display: grid; place-items: center;
+      font-size: 32px; color: white; font-weight: 700;
+      box-shadow: 0 12px 32px rgba(99,102,241,0.4);
+      animation: pulse-boot 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse-boot {
+      0%, 100% { transform: scale(1); box-shadow: 0 12px 32px rgba(99,102,241,0.4); }
+      50% { transform: scale(1.08); box-shadow: 0 16px 48px rgba(139,92,246,0.6); }
+    }
+    .boot-title {
+      font-size: 18px; font-weight: 700; color: #e6e9f2;
+      letter-spacing: -0.01em;
+    }
+    .boot-status {
+      font-size: 13px; color: #a8b0c7;
+      font-family: 'JetBrains Mono', ui-monospace, 'Consolas', monospace;
+      max-width: 600px;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .boot-spinner {
+      width: 28px; height: 28px;
+      border: 2px solid rgba(99,102,241,0.25);
+      border-top-color: #8b5cf6;
+      border-radius: 50%;
+      animation: spin-boot 0.8s linear infinite;
+    }
+    @keyframes spin-boot { to { transform: rotate(360deg); } }
+
+    #boot-error {
+      display: none;
+      max-width: 780px;
+      margin: 20px;
+      background: #1a2138;
+      border: 1px solid #ef4444;
+      border-radius: 12px;
+      padding: 24px;
+      color: #e6e9f2;
+      font-family: 'JetBrains Mono', ui-monospace, 'Consolas', monospace;
+      font-size: 12.5px;
+      line-height: 1.6;
+      max-height: 70vh;
+      overflow: auto;
+    }
+    #boot-error h3 {
+      margin: 0 0 12px;
+      color: #ef4444;
+      font-family: 'Inter', sans-serif;
+      font-size: 16px;
+    }
+    #boot-error pre {
+      background: #0a0e1a;
+      padding: 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 10px 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #boot-error .hint {
+      background: rgba(99,102,241,0.1);
+      border-left: 3px solid #6366f1;
+      padding: 10px 14px;
+      margin-top: 14px;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      color: #a8b0c7;
+    }
+    #boot-error code {
+      background: rgba(0,0,0,0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11.5px;
+    }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.2.0",
+      "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+      "tesseract.js": "https://esm.sh/tesseract.js@5.1.0",
+      "pdfjs-dist": "https://esm.sh/pdfjs-dist@4.0.379",
+      "jspdf": "https://esm.sh/jspdf@2.5.1",
+      "@tensorflow/tfjs": "https://esm.sh/@tensorflow/tfjs@4.17.0",
+      "@tensorflow-models/mobilenet": "https://esm.sh/@tensorflow-models/mobilenet@2.1.1?deps=@tensorflow/tfjs@4.17.0",
+      "@tensorflow-models/knn-classifier": "https://esm.sh/@tensorflow-models/knn-classifier@1.2.4?deps=@tensorflow/tfjs@4.17.0"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="boot-loader">
+    <div class="boot-logo">◉</div>
+    <div class="boot-title">OCR & AI Recognition Studio</div>
+    <div class="boot-spinner" id="boot-spinner"></div>
+    <div class="boot-status" id="boot-status">Initializing…</div>
+    <div id="boot-error"></div>
+  </div>
+
+  <div id="app"></div>
+
+  <script>
+    (function () {
+      const statusEl = document.getElementById('boot-status');
+      const errorEl = document.getElementById('boot-error');
+      const loaderEl = document.getElementById('boot-loader');
+      const spinnerEl = document.getElementById('boot-spinner');
+
+      window.__bootStatus = function (msg) {
+        if (statusEl) statusEl.textContent = msg;
+      };
+
+      window.__bootHideLoader = function () {
+        if (loaderEl) {
+          loaderEl.classList.add('hidden');
+          setTimeout(function () { loaderEl.remove(); }, 500);
+        }
+      };
+
+      window.__bootShowError = function (title, detail, hint) {
+        if (!errorEl) return;
+        if (spinnerEl) spinnerEl.style.display = 'none';
+        if (statusEl) statusEl.style.display = 'none';
+
+        let html = '<h3>⚠️ ' + escapeHtml(title || 'Error') + '</h3>';
+        if (detail) {
+          html += '<pre>' + escapeHtml(detail) + '</pre>';
+        }
+        if (hint) {
+          html += '<div class="hint">' + hint + '</div>';
+        }
+        errorEl.innerHTML = html;
+        errorEl.style.display = 'block';
+      };
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      // ===== In-browser TS/TSX compiler =====
+      // Babel Standalone compiles .ts/.tsx files into JS at runtime
+      // and we wire up imports via Blob URLs + the importmap.
+
+      const SOURCE_FILES = [
+        'src/index.tsx',
+        'src/App.tsx',
+        'src/utils/persistence.ts',
+        'src/components/Sidebar/Sidebar.tsx',
+        'src/components/Card/Card.tsx',
+        'src/components/Button/Button.tsx',
+        'src/components/ProgressBar/ProgressBar.tsx',
+        'src/components/Toast/Toast.tsx',
+        'src/hooks/useToasts.ts',
+        'src/hooks/useCancellable.ts',
+        'src/features/dashboard/Dashboard.tsx',
+        'src/features/ocr/OcrWorkspace.tsx',
+        'src/features/recognition/RecognitionStudio.tsx',
+        'src/features/recognition/CompositeGallery.tsx',
+        'src/features/recognition/RegionOverlay.tsx',
+        'src/features/recognition/AnnotationPanel.tsx',
+        'src/features/database/DatabaseExplorer.tsx',
+        'src/features/search/TextSearch.tsx',
+        'src/services/database.ts',
+        'src/services/imageCompression.ts',
+        'src/services/ocrService.ts',
+        'src/services/pdfExport.ts',
+        'src/services/recognitionService.ts',
+        'src/services/pdfToImages.ts',
+        'src/services/compositeBuilder.ts',
+        'src/services/recognitionReport.ts',
+        'src/services/annotationsService.ts',
+        'src/services/knowledgeAssist.ts',
+        'src/services/ocrRegion.ts',
+        'src/services/imagePreprocess.ts',
+        'src/services/recognitionWorker.ts',
+        'src/state/workspaceState.ts',
+        'src/services/llmService.ts',
+      ];
+
+      const CSS_FILES = [
+        'src/App.css',
+        'src/components/Sidebar/Sidebar.css',
+        'src/components/Card/Card.css',
+        'src/components/Button/Button.css',
+        'src/components/ProgressBar/ProgressBar.css',
+        'src/components/Toast/Toast.css',
+        'src/features/dashboard/Dashboard.css',
+        'src/features/ocr/OcrWorkspace.css',
+        'src/features/recognition/RecognitionStudio.css',
+        'src/features/recognition/CompositeGallery.css',
+        'src/features/recognition/RegionOverlay.css',
+        'src/features/recognition/AnnotationPanel.css',
+        'src/features/database/DatabaseExplorer.css',
+        'src/features/search/TextSearch.css'
+      ];
+
+      // Babel Standalone mirrors — tried in order until one loads.
+      // Fix: Prioritize cdnjs and unpkg over jsdelivr to bypass Edge tracking prevention blockers
+      const BABEL_MIRRORS = [
+        'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.0/babel.min.js',
+        'https://unpkg.com/@babel/standalone@7.24.0/babel.min.js',
+        'https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.0/babel.min.js',
+      ];
+
+      function loadScriptOnce(url) {
+        return new Promise(function (resolve, reject) {
+          const s = document.createElement('script');
+          s.src = url;
+          s.async = true;
+          s.onload = function () { resolve(url); };
+          s.onerror = function () { reject(new Error('Failed to load ' + url)); };
+          document.head.appendChild(s);
+        });
+      }
+
+      async function loadBabel() {
+        if (window.Babel) return window.Babel;
+        window.__bootStatus('Loading TypeScript compiler…');
+        let lastErr = null;
+        for (const url of BABEL_MIRRORS) {
+          try {
+            window.__bootStatus('Loading TypeScript compiler from ' + new URL(url).hostname + '…');
+            await loadScriptOnce(url);
+            if (window.Babel) return window.Babel;
+            lastErr = new Error('Script loaded but Babel global not present: ' + url);
+          } catch (e) {
+            lastErr = e;
+            console.warn('[boot] Babel mirror failed:', url, e);
+          }
+        }
+        throw new Error(
+          'Failed to load Babel Standalone from any mirror (jsdelivr, cdnjs, unpkg). ' +
+          'Your network or browser may be blocking these CDNs. ' +
+          (lastErr ? 'Last error: ' + lastErr.message : '')
+        );
+      }
+
+      async function fetchText(path) {
+        const res = await fetch(path + '?t=' + Date.now(), { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error('Failed to fetch ' + path + ' (HTTP ' + res.status + '). ' +
+            'Make sure index.html and the src/ folder are in the same directory, and that you are using a local server (not file://).');
+        }
+        return await res.text();
+      }
+
+      async function loadCssFiles() {
+        window.__bootStatus('Loading stylesheets…');
+        for (const path of CSS_FILES) {
+          try {
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = path + '?t=' + Date.now();
+            document.head.appendChild(link);
+          } catch (e) {
+            console.warn('Failed to load CSS:', path, e);
+          }
+        }
+      }
+
+      async function loadSourceFiles() {
+        window.__bootStatus('Loading ' + SOURCE_FILES.length + ' source files…');
+        const sources = {};
+        let loaded = 0;
+        for (const path of SOURCE_FILES) {
+          try {
+            sources[path] = await fetchText(path);
+            loaded++;
+            if (loaded % 4 === 0) {
+              window.__bootStatus('Loading source files… ' + loaded + '/' + SOURCE_FILES.length);
+            }
+          } catch (e) {
+            throw new Error('Could not load ' + path + '\n\n' + e.message);
+          }
+        }
+        return sources;
+      }
+
+      // Detect if an import path is a CSS (or other asset) file that
+      // we shouldn't try to resolve as a TypeScript module. These are
+      // already loaded as <link rel="stylesheet"> at boot, so in the
+      // compiled JS we simply strip them out.
+      function isAssetImport(spec) {
+        return /\.(css|scss|sass|less|svg|png|jpg|jpeg|gif|webp)(\?.*)?$/i.test(spec);
+      }
+
+      // Resolve a relative/extensionless TS import to one of our SOURCE_FILES keys.
+      function resolveImportToKey(importerPath, importPath) {
+        // Bare imports are handled by the importmap
+        if (!importPath.startsWith('.') && !importPath.startsWith('/')) {
+          return null;
+        }
+
+        const importerDir = importerPath.substring(0, importerPath.lastIndexOf('/'));
+        let resolved = importPath;
+        if (resolved.startsWith('./')) {
+          resolved = importerDir + '/' + resolved.slice(2);
+        } else if (resolved.startsWith('../')) {
+          let parts = importerDir.split('/');
+          while (resolved.startsWith('../')) {
+            parts.pop();
+            resolved = resolved.slice(3);
+          }
+          resolved = parts.join('/') + '/' + resolved;
+        } else if (resolved.startsWith('/')) {
+          resolved = resolved.slice(1);
+        }
+        resolved = resolved.replace(/\/+/g, '/').replace(/^\.\//, '');
+
+        const candidates = [
+          resolved + '.tsx',
+          resolved + '.ts',
+          resolved + '/index.tsx',
+          resolved + '/index.ts',
+          resolved,
+        ];
+        for (const c of candidates) {
+          if (Object.prototype.hasOwnProperty.call(this.urlMap, c)) return c;
+        }
+        return null;
+      }
+
+      // Rewrite all relative imports in a compiled JS source to point to Blob URLs.
+      // Also strip any asset imports (CSS, images) since those are handled separately.
+      function rewriteImports(jsSource, importerPath, urlMap) {
+        let out = jsSource;
+
+        // First, remove side-effect-only CSS/asset imports:
+        //   import './foo.css';
+        //   import "../styles/bar.css";
+        out = out.replace(
+          /\bimport\s+(['"])([^'"]+)\1\s*;?/g,
+          function (match, quote, spec) {
+            if (isAssetImport(spec)) {
+              return '/* css import stripped: ' + spec + ' */';
+            }
+            return match;
+          }
+        );
+
+        const resolver = { urlMap: urlMap };
+        const resolve = resolveImportToKey.bind(resolver);
+
+        // Match: import ... from 'path'  |  import 'path'  |  export ... from 'path'
+        //        import(...)  (dynamic)
+        const importRegex = /(\bimport\s+(?:[^'"]*\s+from\s+)?|\bexport\s+[^'"]*\s+from\s+|\bimport\s*\(\s*)(['"])([^'"]+)\2/g;
+        out = out.replace(importRegex, function (match, prefix, quote, spec) {
+          if (isAssetImport(spec)) {
+            return prefix + quote + 'data:application/javascript,export%20default%20%7B%7D' + quote;
+          }
+          // Bare import — leave as-is, resolved by importmap
+          if (!spec.startsWith('.') && !spec.startsWith('/')) {
+            return match;
+          }
+          const key = resolve(importerPath, spec);
+          if (key === null || !urlMap[key]) {
+            throw new Error('Cannot resolve import "' + spec + '" from "' + importerPath + '"');
+          }
+          return prefix + quote + urlMap[key] + quote;
+        });
+
+        return out;
+      }
+
+      async function compileAndRun() {
+        try {
+          await loadCssFiles();
+          const Babel = await loadBabel();
+          const sources = await loadSourceFiles();
+
+          window.__bootStatus('Compiling TypeScript… (' + SOURCE_FILES.length + ' files)');
+
+          // Pass 1: compile each file with Babel
+          const compiled = {};
+          let compileCount = 0;
+          for (const path of SOURCE_FILES) {
+            try {
+              const result = Babel.transform(sources[path], {
+                filename: path,
+                presets: [
+                  ['typescript', { allExtensions: true, isTSX: true }],
+                  ['react', { runtime: 'classic' }],
+                ],
+                sourceMaps: 'inline',
+                sourceFileName: path,
+              });
+              compiled[path] = result.code;
+              compileCount++;
+              if (compileCount % 5 === 0) {
+                window.__bootStatus('Compiling… ' + compileCount + '/' + SOURCE_FILES.length);
+              }
+            } catch (e) {
+              throw new Error('Compile error in ' + path + ':\n\n' + (e.message || e));
+            }
+          }
+
+          window.__bootStatus('Linking modules…');
+
+          // ============================================================
+          // Topological-ish linking via placeholder URL trick.
+          // ============================================================
+          // We need each file to import siblings by Blob URL, but Blob URLs
+          // only exist AFTER you create them — creating a chicken-and-egg
+          // problem for circular-ish or forward-referencing imports.
+          //
+          // Solution: create ONE Blob URL per file, keep it stable, and
+          // write the REWRITTEN content to that SAME URL. Since Blob URLs
+          // can't be edited in place, we instead:
+          //
+          //   1. Pre-allocate a urlMap key → url for every file.
+          //   2. Use `URL.createObjectURL` on final content for each file
+          //      AFTER rewriting, using each file's own pre-computed urlMap.
+          //   3. We never revoke — the browser keeps them alive for the
+          //      lifetime of the page (which is fine for a single app).
+          //
+          // To break the chicken-and-egg, we build the urlMap FIRST with
+          // rewritten content:
+          //   - Compute rewritten content for every file
+          //   - For this we need urlMap entries to exist beforehand
+          //   - So we do it in two passes:
+          //       Pass A: create dummy Blob for each file → fills urlMap
+          //       Pass B: compute REAL rewritten content for each file,
+          //               create a REAL Blob, and OVERWRITE the urlMap entry
+          //       Pass C: the only URL we actually import is the entry
+          //               point's Pass-B URL, and its deps point to the
+          //               Pass-B URLs too (since we rewrote with the final
+          //               urlMap)
+          //
+          // This works because Pass A's urls never get used — Pass B
+          // rewrites use the same urlMap (mutated in place) and the Pass-B
+          // URLs replace the Pass-A ones before any import() is called.
+          // ============================================================
+
+          const urlMap = {};
+
+          // Pass A: allocate stable placeholder URLs (content doesn't matter)
+          for (const path of SOURCE_FILES) {
+            const placeholderBlob = new Blob(
+              ['/* placeholder for ' + path + ' */'],
+              { type: 'application/javascript' }
+            );
+            urlMap[path] = URL.createObjectURL(placeholderBlob);
+          }
+
+          // Pass B: rewrite each file using the (now fully-populated) urlMap,
+          // but DON'T overwrite urlMap[path] — we want imports to resolve
+          // to the same URL. Instead, we fetch-and-replace by using a
+          // WRITABLE scheme: create a new blob, then replace urlMap[path]
+          // with it, but ONLY AFTER all rewriting is complete.
+          //
+          // Actually simpler: since rewriting uses urlMap to look up target
+          // URLs, and we want the final Blob URL to BE the one in urlMap,
+          // we just do:
+          //   finalUrl = urlMap[path]  (pre-allocated)
+          //   rewrittenContent = rewrite(compiled[path], urlMap)
+          //   ↑ rewriting points to urlMap entries, which are the SAME
+          //     URLs we're about to replace
+          //   Create new blob from rewrittenContent
+          //   Replace urlMap[path] with new blob URL? NO — then imports to
+          //   that file break.
+          //
+          // The correct, working approach: DO rewriting using urlMap, then
+          // OVERWRITE the blob at each URL. Since Blob URLs are immutable,
+          // we can't. So instead: create a FRESH url for the rewritten
+          // content, update urlMap in-place, and re-run rewriting for
+          // anything that referenced the old URL.
+          //
+          // HOWEVER — a much simpler trick works: since ALL files are
+          // rewritten using the SAME urlMap, and we update urlMap AS WE GO,
+          // any file rewritten LATER will see the newer URL for files
+          // processed earlier. To make this consistent, we do rewriting
+          // in reverse topological order (leaves first). But our files
+          // don't have strict ordering info here.
+          //
+          // The cleanest approach: do rewriting TWICE. First pass uses
+          // placeholder URLs; second pass uses the final URLs from the
+          // first pass. By pass 2, all references are to stable URLs.
+          //
+          // This is what the original code did — the bug was that it
+          // REVOKED the placeholder URLs after pass 2, while pass-2 code
+          // still imported them (because rewriting was done with
+          // urlMap from pass 1). Fix: use ONLY ONE urlMap, update it
+          // in place, never revoke.
+
+          // Strategy: rewrite each file's content, upload as a new Blob,
+          // and REPLACE urlMap[path] in place. Any file processed later
+          // that imports this file will see the new URL. Files processed
+          // earlier still point to the OLD URL (which still exists — we
+          // don't revoke) and happens to contain the PLACEHOLDER. That's
+          // a problem.
+          //
+          // Final working strategy (simplest): do rewriting so that all
+          // rewritten files point to the SAME stable URLs that were
+          // pre-allocated in Pass A. Then, we need the CONTENT at those
+          // URLs to become the rewritten code. Since Blob URLs are
+          // immutable, we must ensure the rewritten content is what we
+          // put in the blob FROM THE START.
+          //
+          // The classical solution: use a ServiceWorker to intercept and
+          // serve dynamic content — overkill here.
+          //
+          // Alternative: emit one "bundle" Blob that contains ALL modules
+          // and uses a synthetic module loader. This sidesteps Blob-URL
+          // mutation entirely.
+
+          // We'll use a tiny bundler approach. Build one big blob that
+          // registers each module by its path key, and provides a
+          // `__require(path)` function. Then rewrite imports to use this
+          // require. Only the ENTRY POINT runs immediately.
+
+          const bundleParts = [];
+          bundleParts.push(
+            '(function(){',
+            '  const __modules = {};',
+            '  const __cache = {};',
+            '  function __require(key) {',
+            '    if (__cache[key]) return __cache[key].exports;',
+            '    const mod = { exports: {} };',
+            '    __cache[key] = mod;',
+            '    const factory = __modules[key];',
+            '    if (!factory) throw new Error("Module not found: " + key);',
+            '    return factory(mod, mod.exports, __require).then ? factory(mod, mod.exports, __require).then(function(){ return mod.exports; }) : mod.exports;',
+            '  }',
+            '  window.__ocrStudioRequire = __require;',
+            '  window.__ocrStudioModules = __modules;',
+            '})();'
+          );
+
+          // We won't actually use this CommonJS-style approach because
+          // our code uses ES module imports (react, tfjs, etc.) that need
+          // real dynamic import for the importmap to work. Abandon bundle.
+
+          // === Back to the two-pass Blob strategy, done correctly ===
+          //
+          // The ROOT CAUSE of the original bug: the placeholder URLs got
+          // revoked, but the rewritten code in the final URLs still
+          // referenced them. The fix is trivial: **do not revoke**.
+          //
+          // We'll also do rewriting with a SINGLE urlMap, build all final
+          // blob URLs, and never revoke anything. Imports in any final
+          // blob point to other final blobs (because we do rewriting AFTER
+          // all final URLs are known). Two phases:
+          //
+          //   Phase 1: Create placeholder blob URLs for every file.
+          //            Store in urlMap[path].
+          //   Phase 2: For each file, rewrite compiled[path] to use
+          //            urlMap (which currently maps to PLACEHOLDERS).
+          //            Create a NEW blob with rewritten content.
+          //            **Update urlMap[path]** to the new URL.
+          //            **But the other files' rewritten content still
+          //              references the OLD url for this path!**
+          //
+          // This is the original bug. To avoid it: rewrite EVERY file
+          // FIRST (all pointing to placeholder URLs), CREATE new blobs
+          // for all (urlMap now points to new blobs for every file),
+          // and importantly, **update the rewritten content's inlined
+          // URLs to the NEW URLs**.
+          //
+          // Trick: do it in three phases.
+          //   Phase 1: Allocate placeholders → placeholderMap
+          //   Phase 2: For each file, compute rewritten content using
+          //            placeholderMap. Create final blobs → finalMap.
+          //            But rewritten content references placeholderMap URLs.
+          //   Phase 3: Rewrite AGAIN using finalMap → finalContent.
+          //            Create blobs from finalContent, overwriting finalMap
+          //            (no — blobs immutable) — actually we create new
+          //            blobs but then the URLs change again.
+          //
+          // Observation: the urls in finalMap don't change in Phase 3 if
+          // we UPDATE blobs... we can't. So: do two passes. Phase A:
+          // placeholders. Phase B: final — but done in a way that the
+          // urls emitted in final content ARE the final urls.
+          //
+          // Concrete fix: rewrite content using a MAP that gets filled as
+          // we go, BUT emit a self-contained wrapper. Since this is
+          // getting too complex, here's the clean, CORRECT solution:
+
+          // === CLEAN SOLUTION ===
+          // Pre-allocate final blob URLs, then construct final content
+          // using those same URLs. Since Blob URLs are assigned BEFORE
+          // the blob content is written (in our allocation), we just
+          // need to create blob content that CONTAINS the pre-allocated
+          // URLs. That's exactly what rewriting does.
+          //
+          // The key insight: URL.createObjectURL returns a URL to a
+          // specific Blob object. We control both. So:
+          //   Phase A: create a "Blob registry" with placeholder content
+          //            → save (url, placeholder_blob) pairs in urlMap.
+          //   Phase B: rewrite all files using urlMap. New blobs are
+          //            created with final content. Store in finalMap.
+          //   Phase C: we now have two sets of URLs. The placeholders
+          //            in urlMap point to placeholder blobs. The final
+          //            URLs in finalMap point to REAL content, but their
+          //            imports reference PLACEHOLDER URLs.
+          //
+          // To avoid this, rewriting must use finalMap, not urlMap. But
+          // finalMap doesn't exist until rewriting is done. Catch-22.
+          //
+          // SOLUTION: Do it in a single atomic step, with foresight.
+          // We pre-generate the final URLs (phase A) by creating blobs
+          // with the FINAL rewritten content. But to rewrite we need the
+          // URLs. However, URL.createObjectURL creates NEW URLs each call.
+          // We don't know the URL until we call createObjectURL.
+          //
+          // Chicken-and-egg confirmed for Blob URLs. That's why bundlers
+          // exist.
+          //
+          // OK — here's the ACTUAL SIMPLE WORKING FIX:
+          //
+          // Use data: URLs instead of Blob URLs. Data URLs can be
+          // constructed from content alone — no indirection, no creation.
+          // We know the URL exactly once we know the content. So:
+          //
+          //   For each file, emit content with imports rewritten using
+          //   data:URL placeholders. Since data URLs CONTAIN the content,
+          //   and content references other data URLs, we need to encode
+          //   everything recursively... no, we can encode final content
+          //   directly because each file's final data URL is just
+          //   base64(finalContent), and finalContent references other
+          //   files' data URLs (which we compute the same way).
+          //
+          // RECURSIVE: data:URL of file A = base64( content that imports
+          // data:URL of file B = base64( content that imports data:URL
+          // of file A = ... )). Cycle. Infinite recursion for circular
+          // imports.
+          //
+          // For our case, there are no real circular imports (standard
+          // React app). So we can do topological order: leaves first.
+          //
+          // Topological sort requires us to know dependencies. We can
+          // extract them from the compiled code. Let's do it.
+
+          // Build dependency graph
+          const deps = {};
+          const importRegex = /(?:\bimport\s+(?:[^'"]*\s+from\s+)?|\bexport\s+[^'"]*\s+from\s+|\bimport\s*\(\s*)(['"])([^'"]+)\1/g;
+
+          function resolveKey(importerPath, spec) {
+            if (!spec.startsWith('.') && !spec.startsWith('/')) return null;
+            const importerDir = importerPath.substring(0, importerPath.lastIndexOf('/'));
+            let resolved = spec;
+            if (resolved.startsWith('./')) {
+              resolved = importerDir + '/' + resolved.slice(2);
+            } else if (resolved.startsWith('../')) {
+              let parts = importerDir.split('/');
+              while (resolved.startsWith('../')) {
+                parts.pop();
+                resolved = resolved.slice(3);
+              }
+              resolved = parts.join('/') + '/' + resolved;
+            } else if (resolved.startsWith('/')) {
+              resolved = resolved.slice(1);
+            }
+            resolved = resolved.replace(/\/+/g, '/').replace(/^\.\//, '');
+            const candidates = [
+              resolved + '.tsx',
+              resolved + '.ts',
+              resolved + '/index.tsx',
+              resolved + '/index.ts',
+              resolved,
+            ];
+            for (const c of candidates) {
+              if (Object.prototype.hasOwnProperty.call(compiled, c)) return c;
+            }
+            return null;
+          }
+
+          for (const path of SOURCE_FILES) {
+            deps[path] = new Set();
+            let m;
+            importRegex.lastIndex = 0;
+            const src = compiled[path];
+            while ((m = importRegex.exec(src)) !== null) {
+              const spec = m[2];
+              if (isAssetImport(spec)) continue;
+              const key = resolveKey(path, spec);
+              if (key) deps[path].add(key);
+            }
+          }
+
+          // Topological sort (Kahn's algorithm) — files with no local
+          // deps come first.
+          const visited = new Set();
+          const order = [];
+          const visiting = new Set();
+          function visit(p) {
+            if (visited.has(p)) return;
+            if (visiting.has(p)) {
+              // circular — just allow it; the later file will use a
+              // placeholder url for earlier cycle member
+              return;
+            }
+            visiting.add(p);
+            for (const d of deps[p] || []) visit(d);
+            visiting.delete(p);
+            visited.add(p);
+            order.push(p);
+          }
+          for (const p of SOURCE_FILES) visit(p);
+
+          window.__bootStatus('Building ' + order.length + ' modules…');
+
+          // Now build blob URLs in topological order. Each file's imports
+          // reference files processed BEFORE it — whose URLs already exist.
+          const finalUrls = {};
+
+          for (const path of order) {
+            const compiledCode = compiled[path];
+            const rewritten = rewriteImportsInline(compiledCode, path, finalUrls, resolveKey);
+            const blob = new Blob([rewritten], { type: 'application/javascript' });
+            finalUrls[path] = URL.createObjectURL(blob);
+          }
+
+          window.__bootStatus('Starting React app…');
+
+          const entryUrl = finalUrls['src/index.tsx'];
+          if (!entryUrl) {
+            throw new Error('Entry point src/index.tsx was not built.');
+          }
+
+          try {
+            await import(entryUrl);
+          } catch (e) {
+            throw new Error('Error executing app entry point:\n\n' + (e.message || e) + '\n\nStack:\n' + (e.stack || '(no stack)'));
+          }
+
+          setTimeout(function () {
+            window.__bootHideLoader();
+          }, 300);
+
+        } catch (err) {
+          console.error('[Boot]', err);
+          window.__bootShowError(
+            'Failed to start app',
+            err && (err.stack || err.message) ? (err.stack || err.message) : String(err),
+            'Common fixes:<br>' +
+            '• Make sure you opened this page via a <strong>local server</strong> (not <code>file://</code>).<br>' +
+            '&nbsp;&nbsp;Use: <code>npx serve .</code> or the VS Code "Live Server" extension.<br>' +
+            '• Make sure <code>index.html</code> and the <code>src/</code> folder are in the same directory.<br>' +
+            '• Make sure your browser can reach at least one of: <code>cdn.jsdelivr.net</code>, <code>cdnjs.cloudflare.com</code>, <code>unpkg.com</code>, <code>esm.sh</code>.<br>' +
+            '• Edge users: try disabling "Tracking prevention" for this site, or use Chrome/Firefox.<br>' +
+            '• Open the browser DevTools Console (F12) for more detail.'
+          );
+        }
+      }
+
+      function rewriteImportsInline(jsSource, importerPath, urlMap, resolveKey) {
+        let out = jsSource;
+
+        // Strip side-effect CSS imports
+        out = out.replace(
+          /\bimport\s+(['"])([^'"]+)\1\s*;?/g,
+          function (match, quote, spec) {
+            if (/\.(css|scss|sass|less|svg|png|jpg|jpeg|gif|webp)(\?.*)?$/i.test(spec)) {
+              return '/* css import stripped: ' + spec + ' */';
+            }
+            return match;
+          }
+        );
+
+        const importRegex = /(\bimport\s+(?:[^'"]*\s+from\s+)?|\bexport\s+[^'"]*\s+from\s+|\bimport\s*\(\s*)(['"])([^'"]+)\2/g;
+
+        out = out.replace(importRegex, function (match, prefix, quote, spec) {
+          if (/\.(css|scss|sass|less|svg|png|jpg|jpeg|gif|webp)(\?.*)?$/i.test(spec)) {
+            return prefix + quote + 'data:application/javascript,export%20default%20%7B%7D' + quote;
+          }
+          if (!spec.startsWith('.') && !spec.startsWith('/')) {
+            return match; // bare, importmap handles it
+          }
+          const key = resolveKey(importerPath, spec);
+          if (!key) {
+            throw new Error('Cannot resolve import "' + spec + '" from "' + importerPath + '"');
+          }
+          const url = urlMap[key];
+          if (!url) {
+            // Circular dependency — emit a dynamic import fallback string.
+            // Without the URL yet, this import will fail. We throw so the
+            // error is clear.
+            throw new Error(
+              'Circular import not resolvable: "' + spec + '" from "' + importerPath +
+              '" — dependency "' + key + '" has not been built yet.'
+            );
+          }
+          return prefix + quote + url + quote;
+        });
+
+        return out;
+      }
+
+      window.addEventListener('error', function (e) {
+        console.error('[window.error]', e.error || e.message);
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        console.error('[unhandledrejection]', e.reason);
+      });
+
+      compileAndRun();
+    })();
+  </script>
+</body>
+</html>

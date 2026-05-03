@@ -1,0 +1,27 @@
+
+.card {
+  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-1) 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+  gap: 16px;
+}
+.card-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+.card-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.card-body { }
