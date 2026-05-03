@@ -1,7 +1,7 @@
 // Service for integrating with the Gemini API to provide AI features
 // like OCR text auto-correction.
 
-const apiKey = "AIzaSyATKT9ZW5uvEOvbBUeQYmQD1odvKZCnbK8"; 
+const apiKey = ""; 
 
 async function fetchWithBackoff(url: string, options: RequestInit, retries = 5) {
   const delays = [1000, 2000, 4000, 8000, 16000];
